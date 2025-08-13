@@ -1,0 +1,144 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Owner Admin – Appointments</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      :root { --muted:#6b7280; --line:#e5e7eb; --bg:#f9fafb; --ink:#111827; }
+      * { box-sizing: border-box }
+      body { margin:24px; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:var(--ink); background:var(--bg); }
+      h1 { margin:0 0 8px }
+      .subtitle { color:var(--muted); margin:0 0 16px; font-size:13px }
+      .bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px }
+      input, select, button { border:1px solid var(--line); background:#fff; padding:8px 10px; border-radius:10px; font-size:14px }
+      button { cursor:pointer }
+      .pill { padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); background:#fff }
+      .pill.new{background:#eef2ff} .pill.confirmed{background:#ecfeff} .pill.completed{background:#ecfdf5} .pill.canceled{background:#fef2f2}
+      table { width:100%; border-collapse: collapse; background:#fff; border-radius:14px; overflow:hidden; }
+      th, td { border-bottom:1px solid var(--line); padding:10px 12px; text-align:left; vertical-align:top; }
+      th { background:#fff; font-weight:600; font-size:13px }
+      tbody tr:hover { background:#fafafa }
+      .muted { color:var(--muted); font-size:12px }
+      .right { text-align:right }
+      .actions button { margin-right:6px }
+      .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:12px }
+      .hidden { display:none }
+    </style>
+  </head>
+  <body>
+    <h1>Appointments</h1>
+    <p class="subtitle">Owner dashboard (protected by your IP via the API).</p>
+
+    <div class="bar">
+      <input id="q" placeholder="Search name / email / phone / vehicle" style="min-width:260px" />
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option>new</option>
+        <option>confirmed</option>
+        <option>completed</option>
+        <option>canceled</option>
+      </select>
+      <button id="refresh">Refresh</button>
+      <button id="export">Export CSV</button>
+      <span id="count" class="pill">0 records</span>
+      <span id="ip" class="pill"></span>
+    </div>
+
+    <div id="msg" class="card hidden"></div>
+
+    <table id="tbl" class="hidden">
+      <thead>
+        <tr>
+          <th style="width:140px">When</th>
+          <th>Customer</th>
+          <th>Vehicle</th>
+          <th>Package</th>
+          <th class="right" style="width:90px">Price</th>
+          <th style="width:110px">Status</th>
+          <th style="width:220px">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <script>
+      const API = "/api/admin/appointments";
+      let ALL = [];
+
+      const $ = (id) => document.getElementById(id);
+      const setMsg = (t="") => { const b = $("msg"); if(!t){b.classList.add("hidden"); b.textContent="";} else {b.textContent=t; b.classList.remove("hidden");} };
+
+      function asCSV(rows) {
+        const head = ["date","time","name","phone","email","vehicle","package","price","status","notes"];
+        const esc = (s="") => `"${String(s).replaceAll('"','""')}"`;
+        return [head.join(",")].concat(rows.map(r=>[
+          r.appt_date,r.appt_time,r.name,r.phone,r.email,r.vehicle,r.package_name,r.price,r.status,r.notes
+        ].map(esc).join(","))).join("\n");
+      }
+      function download(name, text) { const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type:"text/csv"})); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
+
+      function render(list, ip) {
+        const q = $("q").value.toLowerCase().trim();
+        const f = $("statusFilter").value;
+
+        let rows = list.slice();
+        if (q) rows = rows.filter(r => [r.name,r.email,r.phone,r.vehicle,r.package_name].some(v => String(v||"").toLowerCase().includes(q)));
+        if (f) rows = rows.filter(r => (r.status||"") === f);
+
+        rows.sort((a,b)=> (a.appt_date||"").localeCompare(b.appt_date||"") || (a.appt_time||"").localeCompare(b.appt_time||""));
+
+        $("count").textContent = `${rows.length} record${rows.length!==1?"s":""}`;
+        $("ip").textContent = ip ? `Your IP: ${ip}` : "";
+
+        const tbody = $("rows"); tbody.innerHTML = "";
+        rows.forEach(r => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${r.appt_date||""} ${r.appt_time||""}</td>
+            <td>
+              <div><strong>${r.name||""}</strong></div>
+              <div class="muted"><a href="tel:${r.phone||""}">${r.phone||""}</a> · <a href="mailto:${r.email||""}">${r.email||""}</a></div>
+              ${r.notes ? `<div class="muted">Notes: ${r.notes}</div>` : ""}
+            </td>
+            <td>${r.vehicle||""}</td>
+            <td>${r.package_name||""}</td>
+            <td class="right">$${r.price||""}</td>
+            <td><span class="pill ${r.status||"new"}">${r.status||"new"}</span></td>
+            <td class="actions">
+              <button data-id="${r.id}" data-status="confirmed">Confirm</button>
+              <button data-id="${r.id}" data-status="completed">Done</button>
+              <button data-id="${r.id}" data-status="canceled">Cancel</button>
+            </td>`;
+          tbody.appendChild(tr);
+        });
+        $("tbl").classList.remove("hidden");
+      }
+
+      async function load() {
+        setMsg("Loading…"); $("tbl").classList.add("hidden");
+        try {
+          const res = await fetch(API, { cache: "no-store" });
+          const out = await res.json();
+          if (!res.ok) {
+            if (out.error === "Forbidden (IP)") { setMsg(`Access denied. Server sees your IP as ${out.ip}. Add it to ADMIN_IPS and redeploy.`); return; }
+            setMsg(out.error || "Error loading data"); return;
+          }
+          ALL = out.data || []; setMsg(""); render(ALL, out.ip);
+        } catch { setMsg("Network error. Try refresh."); }
+      }
+      async function setStatus(id, status) {
+        const res = await fetch(API, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
+        if (!res.ok) return alert("Update failed"); load();
+      }
+
+      $("refresh").addEventListener("click", load);
+      $("export").addEventListener("click", () => download(`appointments-${new Date().toISOString().slice(0,10)}.csv`, asCSV(ALL)));
+      $("q").addEventListener("input", () => render(ALL, $("ip").textContent.replace("Your IP: ", "")));
+      $("statusFilter").addEventListener("change", () => render(ALL, $("ip").textContent.replace("Your IP: ", "")));
+      document.addEventListener("click", (e) => { if (e.target.tagName==="BUTTON" && e.target.dataset.status) setStatus(e.target.dataset.id, e.target.dataset.status); });
+
+      load();
+    </script>
+  </body>
+</html>
