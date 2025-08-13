@@ -7,18 +7,7 @@
   </head>
   <body>
     <div id="root"></div>
-
-    <!-- Boot the app directly from App.jsx (no main.jsx required) -->
-    <script type="module">
-      import React from "react";
-      import ReactDOM from "react-dom/client";
-      import App from "./src/App.jsx";   // <= IMPORTANT: relative path, case-sensitive
-
-      ReactDOM.createRoot(document.getElementById("root")).render(
-        <React.StrictMode>
-          <App />
-        </React.StrictMode>
-      );
-    </script>
+    <!-- use a RELATIVE path; case-sensitive -->
+    <script type="module" src="./src/main.jsx"></script>
   </body>
 </html>
